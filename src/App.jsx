@@ -1,5 +1,5 @@
-
 import { useState, useEffect } from "react";
+import { supabase } from "./supabase";
 
 // ── マスタ ──
 const SC = ['#2563eb','#16a34a','#d97706','#9333ea','#e11d48','#0891b2'];
@@ -16,54 +16,6 @@ const nowStr = () => {
 };
 const fmt = s => { if(!s) return ''; const [,m,d] = s.split('-'); return `${+m}月${+d}日`; };
 const daysBetween = (from, to) => Math.floor((new Date(to) - new Date(from)) / 86400000);
-
-// ── 初期データ ──
-const INIT = {
-  sites: [
-    {id:1, name:'○○邸新築', color:'#2563eb'},
-    {id:2, name:'△△邸新築', color:'#16a34a'}
-  ],
-  members: ['山田','田中','佐藤','鈴木','伊藤','自分'],
-  // wh: 'A'＝材料・建材・SE金物倉庫 / 'B'＝道具・金物倉庫
-  materials: [
-    {id:1, wh:'A', name:'構造用合板 24mm 3×6', category:'面材・ボード', qty:45, unit:'枚', min:20, loc:'A-1'},
-    {id:2, wh:'A', name:'石膏ボード 12.5mm 3×8', category:'面材・ボード', qty:8, unit:'枚', min:30, loc:'A-2'},
-    {id:3, wh:'A', name:'桧土台 105角 4m', category:'構造材', qty:12, unit:'本', min:5, loc:'A-3'},
-    {id:4, wh:'A', name:'グラスウール 105mm', category:'断熱材', qty:6, unit:'坪', min:10, loc:'A-4'},
-    {id:5, wh:'A', name:'SE専用ボルト M16', category:'SE金物', qty:120, unit:'本', min:50, loc:'A-5'},
-    {id:6, wh:'A', name:'ドリフトピン', category:'SE金物', qty:200, unit:'本', min:100, loc:'A-5'},
-    {id:7, wh:'A', name:'コーススレッド 65mm', category:'副資材・消耗品', qty:7, unit:'箱', min:5, loc:'A-6'},
-    {id:8, wh:'A', name:'気密テープ 75mm', category:'副資材・消耗品', qty:14, unit:'巻', min:6, loc:'A-6'},
-    {id:9, wh:'B', name:'羽子板ボルト', category:'金物', qty:40, unit:'本', min:20, loc:'B-1'},
-    {id:10, wh:'B', name:'筋かいプレート', category:'金物', qty:60, unit:'枚', min:30, loc:'B-1'},
-    {id:11, wh:'B', name:'かすがい', category:'金物', qty:80, unit:'本', min:40, loc:'B-2'}
-  ],
-  tools: [
-    {id:1, name:'インパクトドライバー M18', no:'D-01', category:'電動工具', status:'持出中', siteId:1, member:'山田', outDate:'2026-06-28', checkDue:''},
-    {id:2, name:'丸ノコ 165mm', no:'D-02', category:'電動工具', status:'倉庫', siteId:'', member:'', outDate:'', checkDue:''},
-    {id:3, name:'釘打機 90mm', no:'D-03', category:'電動工具', status:'持出中', siteId:1, member:'田中', outDate:'2026-06-15', checkDue:''},
-    {id:4, name:'スライド丸ノコ 216mm', no:'D-04', category:'電動工具', status:'倉庫', siteId:'', member:'', outDate:'', checkDue:''},
-    {id:5, name:'トルクレンチ（SE金物用）', no:'S-01', category:'測定・墨出し', status:'持出中', siteId:2, member:'佐藤', outDate:'2026-07-01', checkDue:'2026-07-31'},
-    {id:6, name:'レーザー墨出し器', no:'S-02', category:'測定・墨出し', status:'倉庫', siteId:'', member:'', outDate:'', checkDue:'2026-09-30'},
-    {id:7, name:'ハンマードリル', no:'D-05', category:'電動工具', status:'倉庫', siteId:'', member:'', outDate:'', checkDue:''}
-  ],
-  ntfs: [
-    {id:3, dt:'2026-07-01 08:12', type:'out', text:'佐藤 が トルクレンチ（SE金物用） を持出（△△邸新築）'},
-    {id:2, dt:'2026-06-28 07:45', type:'out', text:'山田 が インパクトドライバー M18 を持出（○○邸新築）'},
-    {id:1, dt:'2026-06-15 07:30', type:'out', text:'田中 が 釘打機 90mm を持出（○○邸新築）'}
-  ],
-  nextId: 20
-};
-
-// ── 保存データの読み込み（Vercel本番用：端末のlocalStorageに保存） ──
-const STORAGE_KEY = 'souko-kanri-v1';
-const LOADED = (() => {
-  try {
-    const s = localStorage.getItem(STORAGE_KEY);
-    if(!s) return INIT;
-    return {...INIT, ...JSON.parse(s)};
-  } catch { return INIT; }
-})();
 
 // ── スタイル ──
 const AC = '#c2410c';
@@ -98,25 +50,20 @@ const Chip = ({active, color=AC, onClick, children}) => (
 
 export default function App() {
   const [tab, setTab] = useState('home');
-  const [sites, setSites] = useState(LOADED.sites);
-  const [members, setMembers] = useState(LOADED.members);
-  const [materials, setMaterials] = useState(LOADED.materials);
-  const [tools, setTools] = useState(LOADED.tools);
-  const [ntfs, setNtfs] = useState(LOADED.ntfs);
-  const [nextId, setNextId] = useState(LOADED.nextId);
-
-  // 変更のたびに端末へ自動保存
-  useEffect(() => {
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({sites, members, materials, tools, ntfs, nextId})); } catch {}
-  }, [sites, members, materials, tools, ntfs, nextId]);
+  const [loading, setLoading] = useState(true);
+  const [sites, setSites] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [materials, setMaterials] = useState([]);
+  const [tools, setTools] = useState([]);
+  const [ntfs, setNtfs] = useState([]);
 
   // 倉庫A
   const [mcat, setMcat] = useState('all');
-  const [mForm, setMForm] = useState(null);        // {id, mode:'in'|'out', qty, siteId, member}
-  const [mAdd, setMAdd] = useState(false);          // false | 'A' | 'B'
+  const [mForm, setMForm] = useState(null);
+  const [mAdd, setMAdd] = useState(false);
   const [nm, setNm] = useState({name:'',category:MCAT_A[0],qty:'',unit:'枚',min:'',loc:''});
   // 倉庫B
-  const [bview, setBview] = useState('tool');       // 'tool' | 'kana'
+  const [bview, setBview] = useState('tool');
   const [tflt, setTflt] = useState('all');
   const [tForm, setTForm] = useState(null);
   const [tAdd, setTAdd] = useState(false);
@@ -126,12 +73,35 @@ export default function App() {
   const [newMem, setNewMem] = useState('');
 
   const gs = id => sites.find(s => s.id == id);
-  const notify = (text, type) => {
-    setNtfs(p => [{id:nextId+500, dt:nowStr(), type, text}, ...p]);
+  const firstMem = () => members[0]?.name || '';
+  const dberr = (e) => { console.error(e); alert('保存に失敗しました。電波状況を確認してもう一度お試しください'); };
+
+  // ── データ読み込み（全員共通のデータベースから取得） ──
+  const fetchAll = async () => {
+    const [s, m, mat, t, n] = await Promise.all([
+      supabase.from('sites').select('*').order('id'),
+      supabase.from('members').select('*').order('id'),
+      supabase.from('materials').select('*').order('id'),
+      supabase.from('tools').select('*').order('id'),
+      supabase.from('ntfs').select('*').order('id', {ascending:false}).limit(100),
+    ]);
+    if(s.error || m.error || mat.error || t.error || n.error){
+      alert('データの読み込みに失敗しました。通信環境を確認してください');
+      return;
+    }
+    setSites(s.data); setMembers(m.data); setMaterials(mat.data);
+    setTools(t.data); setNtfs(n.data);
+    setLoading(false);
+  };
+  useEffect(() => { fetchAll(); }, []);
+
+  const notify = async (body, type) => {
+    const { data, error } = await supabase.from('ntfs').insert({dt: nowStr(), type, body}).select().single();
+    if(!error && data) setNtfs(p => [data, ...p]);
   };
 
   // ── 在庫品の入出庫（倉庫A・B共通） ──
-  const execMat = () => {
+  const execMat = async () => {
     const m = materials.find(x => x.id === mForm.id);
     const n = parseInt(mForm.qty);
     if(!n || n <= 0) return alert('数量を入力してください');
@@ -139,60 +109,96 @@ export default function App() {
       if(!mForm.siteId) return alert('出庫先の現場を選択してください');
       if(n > m.qty) return alert(`在庫が足りません（現在 ${m.qty}${m.unit}）`);
       const newQty = m.qty - n;
-      setMaterials(p => p.map(x => x.id === m.id ? {...x, qty:newQty} : x));
+      const { data, error } = await supabase.from('materials').update({qty:newQty}).eq('id', m.id).select().single();
+      if(error) return dberr(error);
+      setMaterials(p => p.map(x => x.id === m.id ? data : x));
       const s = gs(mForm.siteId);
-      notify(`${mForm.member} が ${m.name} ×${n}${m.unit} を出庫（${s?.name}／倉庫${m.wh}）`, 'out');
-      if(newQty < m.min) notify(`【在庫不足】${m.name} が残り ${newQty}${m.unit}（発注点 ${m.min}${m.unit}）`, 'low');
+      await notify(`${mForm.member} が ${m.name} ×${n}${m.unit} を出庫（${s?.name}／倉庫${m.wh}）`, 'out');
+      if(newQty < m.min_qty) await notify(`【在庫不足】${m.name} が残り ${newQty}${m.unit}（発注点 ${m.min_qty}${m.unit}）`, 'low');
     } else {
-      setMaterials(p => p.map(x => x.id === m.id ? {...x, qty:x.qty + n} : x));
-      notify(`${m.name} ×${n}${m.unit} を入庫（倉庫${m.wh}）`, 'in');
+      const { data, error } = await supabase.from('materials').update({qty:m.qty + n}).eq('id', m.id).select().single();
+      if(error) return dberr(error);
+      setMaterials(p => p.map(x => x.id === m.id ? data : x));
+      await notify(`${m.name} ×${n}${m.unit} を入庫（倉庫${m.wh}）`, 'in');
     }
     setMForm(null);
   };
 
-  const addMat = () => {
+  const addMat = async () => {
     if(!nm.name.trim()) return alert('品名は必須です');
     const wh = mAdd;
-    setMaterials(p => [...p, {id:nextId, wh, name:nm.name.trim(), category:wh==='B'?'金物':nm.category, qty:parseInt(nm.qty)||0, unit:nm.unit||'個', min:parseInt(nm.min)||0, loc:nm.loc.trim()}]);
-    setNextId(n => n+1);
+    const { data, error } = await supabase.from('materials').insert({
+      wh, name:nm.name.trim(), category: wh==='B' ? '金物' : nm.category,
+      qty: parseInt(nm.qty)||0, unit: nm.unit||'個', min_qty: parseInt(nm.min)||0, loc: nm.loc.trim()
+    }).select().single();
+    if(error) return dberr(error);
+    setMaterials(p => [...p, data]);
     setNm({name:'',category:MCAT_A[0],qty:'',unit:'枚',min:'',loc:''});
     setMAdd(false);
   };
 
+  const delMat = async (m) => {
+    if(!window.confirm(`「${m.name}」を削除しますか？\n全員の画面から消えます。`)) return;
+    const { error } = await supabase.from('materials').delete().eq('id', m.id);
+    if(error) return dberr(error);
+    setMaterials(p => p.filter(x => x.id !== m.id));
+    await notify(`${m.name} を品目から削除`, 'del');
+  };
+
   // ── 道具の持出・返却 ──
-  const execOut = () => {
+  const execOut = async () => {
     const t = tools.find(x => x.id === tForm.id);
     if(!tForm.siteId) return alert('現場を選択してください');
-    setTools(p => p.map(x => x.id === t.id ? {...x, status:'持出中', siteId:parseInt(tForm.siteId), member:tForm.member, outDate:today()} : x));
+    const { data, error } = await supabase.from('tools').update({
+      status:'持出中', site_id: parseInt(tForm.siteId), member: tForm.member, out_date: today()
+    }).eq('id', t.id).select().single();
+    if(error) return dberr(error);
+    setTools(p => p.map(x => x.id === t.id ? data : x));
     const s = gs(tForm.siteId);
-    notify(`${tForm.member} が ${t.name} を持出（${s?.name}）`, 'out');
+    await notify(`${tForm.member} が ${t.name} を持出（${s?.name}）`, 'out');
     setTForm(null);
   };
 
-  const execBack = (id) => {
+  const execBack = async (id) => {
     const t = tools.find(x => x.id === id);
-    const s = gs(t.siteId);
-    setTools(p => p.map(x => x.id === id ? {...x, status:'倉庫', siteId:'', member:'', outDate:''} : x));
-    notify(`${t.member} が ${t.name} を返却（${s?.name || ''}）`, 'back');
+    const s = gs(t.site_id);
+    const { data, error } = await supabase.from('tools').update({
+      status:'倉庫', site_id: null, member:'', out_date: null
+    }).eq('id', id).select().single();
+    if(error) return dberr(error);
+    setTools(p => p.map(x => x.id === id ? data : x));
+    await notify(`${t.member} が ${t.name} を返却（${s?.name || ''}）`, 'back');
   };
 
-  const addTool = () => {
+  const addTool = async () => {
     if(!nt.name.trim()) return alert('道具名は必須です');
-    setTools(p => [...p, {id:nextId, name:nt.name.trim(), no:nt.no.trim(), category:nt.category, status:'倉庫', siteId:'', member:'', outDate:'', checkDue:nt.checkDue}]);
-    setNextId(n => n+1);
+    const { data, error } = await supabase.from('tools').insert({
+      name: nt.name.trim(), mgmt_no: nt.no.trim(), category: nt.category, status:'倉庫',
+      check_due: nt.checkDue || null
+    }).select().single();
+    if(error) return dberr(error);
+    setTools(p => [...p, data]);
     setNt({name:'',no:'',category:TCAT[0],checkDue:''});
     setTAdd(false);
   };
 
+  const delTool = async (t) => {
+    if(!window.confirm(`「${t.name}」を削除しますか？\n全員の画面から消えます。`)) return;
+    const { error } = await supabase.from('tools').delete().eq('id', t.id);
+    if(error) return dberr(error);
+    setTools(p => p.filter(x => x.id !== t.id));
+    await notify(`${t.name} を道具リストから削除`, 'del');
+  };
+
   // ── 集計 ──
-  const lowMats = materials.filter(m => m.qty < m.min);
+  const lowMats = materials.filter(m => m.qty < m.min_qty);
   const outTools = tools.filter(t => t.status === '持出中');
-  const longOut = outTools.filter(t => daysBetween(t.outDate, today()) >= 7);
-  const dueTools = tools.filter(t => t.checkDue && daysBetween(today(), t.checkDue) <= 30);
+  const longOut = outTools.filter(t => daysBetween(t.out_date, today()) >= 7);
+  const dueTools = tools.filter(t => t.check_due && daysBetween(today(), t.check_due) <= 30);
 
   // ── 在庫品カード（共通） ──
   const matCard = (m) => {
-    const low = m.qty < m.min;
+    const low = m.qty < m.min_qty;
     const opened = mForm && mForm.id === m.id;
     return (
       <div key={m.id} style={{...S.card, ...(low?{borderColor:'#fecaca',background:'#fff9f9'}:{})}}>
@@ -207,14 +213,15 @@ export default function App() {
           </div>
           <div style={{textAlign:'right',marginLeft:8}}>
             <div style={{fontSize:24,fontWeight:800,color:low?'#dc2626':'#1e293b',lineHeight:1}}>{m.qty}<span style={{fontSize:12,fontWeight:600,color:'#94a3b8'}}> {m.unit}</span></div>
-            <div style={{fontSize:10,color:'#94a3b8',marginTop:3}}>発注点 {m.min}{m.unit}</div>
+            <div style={{fontSize:10,color:'#94a3b8',marginTop:3}}>発注点 {m.min_qty}{m.unit}</div>
           </div>
         </div>
 
         {!opened ? (
           <div style={{display:'flex',gap:6,marginTop:10,paddingTop:10,borderTop:'0.5px solid #f1f5f9'}}>
-            <button style={{...S.btnSm,flex:1,color:'#16a34a',borderColor:'#bbf7d0'}} onClick={()=>setMForm({id:m.id,mode:'in',qty:'',siteId:'',member:members[0]})}>＋ 入庫</button>
-            <button style={{...S.btnSm,flex:1,color:'#c2410c',borderColor:'#fdba74'}} onClick={()=>setMForm({id:m.id,mode:'out',qty:'',siteId:'',member:members[0]})}>− 出庫</button>
+            <button style={{...S.btnSm,flex:1,color:'#16a34a',borderColor:'#bbf7d0'}} onClick={()=>setMForm({id:m.id,mode:'in',qty:'',siteId:'',member:firstMem()})}>＋ 入庫</button>
+            <button style={{...S.btnSm,flex:1,color:'#c2410c',borderColor:'#fdba74'}} onClick={()=>setMForm({id:m.id,mode:'out',qty:'',siteId:'',member:firstMem()})}>− 出庫</button>
+            <button style={{...S.btnSm,color:'#dc2626',borderColor:'#fecaca'}} onClick={()=>delMat(m)}>削除</button>
           </div>
         ) : (
           <div style={{marginTop:10,paddingTop:10,borderTop:'0.5px solid #f1f5f9'}}>
@@ -223,7 +230,7 @@ export default function App() {
               <input type="number" min="1" style={S.input} placeholder={`数量（${m.unit}）`} value={mForm.qty} onChange={e=>setMForm(f=>({...f,qty:e.target.value}))}/>
               {mForm.mode==='out' && (
                 <select style={S.input} value={mForm.member} onChange={e=>setMForm(f=>({...f,member:e.target.value}))}>
-                  {members.map(x=><option key={x}>{x}</option>)}
+                  {members.map(x=><option key={x.id} value={x.name}>{x.name}</option>)}
                 </select>
               )}
             </div>
@@ -295,7 +302,7 @@ export default function App() {
           {lowMats.map(m => (
             <div key={m.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'7px 0',borderBottom:'0.5px solid #fecaca',fontSize:13}}>
               <span style={{fontWeight:700,color:'#991b1b'}}><Badge type="gray">倉庫{m.wh}</Badge> {m.name}</span>
-              <span style={{color:'#dc2626',flexShrink:0,marginLeft:8}}>残 {m.qty}{m.unit}（発注点 {m.min}）</span>
+              <span style={{color:'#dc2626',flexShrink:0,marginLeft:8}}>残 {m.qty}{m.unit}（発注点 {m.min_qty}）</span>
             </div>
           ))}
         </div>
@@ -307,7 +314,7 @@ export default function App() {
           {longOut.map(t => (
             <div key={t.id} style={{padding:'7px 0',borderBottom:'0.5px solid #fde68a',fontSize:13}}>
               <div style={{fontWeight:700,color:'#92400e'}}>{t.name}</div>
-              <div style={{fontSize:11,color:'#d97706',marginTop:2}}>{t.member} / {gs(t.siteId)?.name} / {daysBetween(t.outDate, today())}日経過</div>
+              <div style={{fontSize:11,color:'#d97706',marginTop:2}}>{t.member} / {gs(t.site_id)?.name} / {daysBetween(t.out_date, today())}日経過</div>
             </div>
           ))}
         </div>
@@ -319,7 +326,7 @@ export default function App() {
           {dueTools.map(t => (
             <div key={t.id} style={{display:'flex',justifyContent:'space-between',padding:'7px 0',borderBottom:'0.5px solid #f1f5f9',fontSize:13}}>
               <span style={{fontWeight:700}}>{t.name}</span>
-              <span style={{color:'#c2410c'}}>{fmt(t.checkDue)} まで</span>
+              <span style={{color:'#c2410c'}}>{fmt(t.check_due)} まで</span>
             </div>
           ))}
         </div>
@@ -328,7 +335,7 @@ export default function App() {
       <div style={S.card}>
         <div style={S.sectionTitle}>現場別 持出道具</div>
         {sites.map(s => {
-          const ts = outTools.filter(t => t.siteId === s.id);
+          const ts = outTools.filter(t => t.site_id === s.id);
           return (
             <div key={s.id} style={{padding:'10px 0',borderBottom:'0.5px solid #f1f5f9'}}>
               <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
@@ -418,24 +425,24 @@ export default function App() {
 
             {list.map(t => {
               const out = t.status === '持出中';
-              const d = out ? daysBetween(t.outDate, today()) : 0;
-              const due = t.checkDue && daysBetween(today(), t.checkDue) <= 30;
+              const d = out ? daysBetween(t.out_date, today()) : 0;
+              const due = t.check_due && daysBetween(today(), t.check_due) <= 30;
               const opened = tForm && tForm.id === t.id;
               return (
                 <div key={t.id} style={S.card}>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
                     <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
                       <Badge type={out?'amber':'green'}>{t.status}</Badge>
-                      {t.no && <Badge type="gray">{t.no}</Badge>}
+                      {t.mgmt_no && <Badge type="gray">{t.mgmt_no}</Badge>}
                       {out && d >= 7 && <Badge type="red">{d}日経過</Badge>}
-                      {due && <Badge type="orange">点検 {fmt(t.checkDue)}まで</Badge>}
+                      {due && <Badge type="orange">点検 {fmt(t.check_due)}まで</Badge>}
                     </div>
                   </div>
                   <div style={{fontSize:14,fontWeight:700,color:'#1e293b'}}>{t.name}</div>
                   <div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>{t.category}</div>
                   {out && (
                     <div style={{fontSize:12,color:'#64748b',marginTop:6,background:'#fffbeb',borderRadius:8,padding:'7px 10px'}}>
-                      {gs(t.siteId)?.name} / {t.member} / {fmt(t.outDate)}持出
+                      {gs(t.site_id)?.name} / {t.member} / {fmt(t.out_date)}持出
                     </div>
                   )}
 
@@ -443,13 +450,16 @@ export default function App() {
                     <div style={{display:'flex',gap:6,marginTop:10,paddingTop:10,borderTop:'0.5px solid #f1f5f9'}}>
                       {out
                         ? <button style={{...S.btnSm,flex:1,color:'#16a34a',borderColor:'#bbf7d0'}} onClick={()=>execBack(t.id)}>返却する</button>
-                        : <button style={{...S.btnSm,flex:1,color:'#c2410c',borderColor:'#fdba74'}} onClick={()=>setTForm({id:t.id,member:members[0],siteId:''})}>持ち出す</button>}
+                        : <button style={{...S.btnSm,flex:1,color:'#c2410c',borderColor:'#fdba74'}} onClick={()=>setTForm({id:t.id,member:firstMem(),siteId:''})}>持ち出す</button>}
+                      {!out && (
+                        <button style={{...S.btnSm,color:'#dc2626',borderColor:'#fecaca'}} onClick={()=>delTool(t)}>削除</button>
+                      )}
                     </div>
                   ) : (
                     <div style={{marginTop:10,paddingTop:10,borderTop:'0.5px solid #f1f5f9'}}>
                       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
                         <select style={S.input} value={tForm.member} onChange={e=>setTForm(f=>({...f,member:e.target.value}))}>
-                          {members.map(x=><option key={x}>{x}</option>)}
+                          {members.map(x=><option key={x.id} value={x.name}>{x.name}</option>)}
                         </select>
                         <select style={S.input} value={tForm.siteId} onChange={e=>setTForm(f=>({...f,siteId:e.target.value}))}>
                           <option value="">現場を選択</option>
@@ -473,21 +483,21 @@ export default function App() {
 
   // ── 持出中 ──
   const renderOut = () => {
-    const list = [...outTools].sort((a,b)=>a.outDate.localeCompare(b.outDate));
+    const list = [...outTools].sort((a,b)=>(a.out_date||'').localeCompare(b.out_date||''));
     return (
       <div>
         <div style={S.card}>
           <div style={S.sectionTitle}>持出中の道具（{list.length}点）</div>
           {!list.length && <div style={{textAlign:'center',padding:32,color:'#94a3b8',fontSize:14}}>持出中の道具はありません</div>}
           {list.map(t => {
-            const d = daysBetween(t.outDate, today());
+            const d = daysBetween(t.out_date, today());
             return (
               <div key={t.id} style={{padding:'10px 0',borderBottom:'0.5px solid #f1f5f9'}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
                   <span style={{fontSize:14,fontWeight:700}}>{t.name}</span>
                   <Badge type={d>=7?'red':'gray'}>{d}日</Badge>
                 </div>
-                <div style={{fontSize:12,color:'#64748b',marginTop:3}}>{gs(t.siteId)?.name} / {t.member} / {fmt(t.outDate)}〜</div>
+                <div style={{fontSize:12,color:'#64748b',marginTop:3}}>{gs(t.site_id)?.name} / {t.member} / {fmt(t.out_date)}〜</div>
                 <button style={{...S.btnSm,marginTop:6,color:'#16a34a',borderColor:'#bbf7d0'}} onClick={()=>execBack(t.id)}>返却する</button>
               </div>
             );
@@ -500,25 +510,25 @@ export default function App() {
 
   // ── 通知 ──
   const renderNtf = () => {
-    const col = {out:'#c2410c', in:'#16a34a', back:'#2563eb', low:'#dc2626'};
-    const lbl = {out:'持出/出庫', in:'入庫', back:'返却', low:'在庫不足'};
+    const col = {out:'#c2410c', in:'#16a34a', back:'#2563eb', low:'#dc2626', del:'#64748b'};
+    const lbl = {out:'持出/出庫', in:'入庫', back:'返却', low:'在庫不足', del:'削除'};
     return (
       <div>
         <div style={S.card}>
-          <div style={S.sectionTitle}>通知・動きの記録</div>
+          <div style={S.sectionTitle}>通知・動きの記録（全員共通）</div>
           {!ntfs.length && <div style={{textAlign:'center',padding:32,color:'#94a3b8',fontSize:14}}>まだ記録がありません</div>}
           {ntfs.map(n => (
             <div key={n.id} style={{display:'flex',gap:10,padding:'10px 0',borderBottom:'0.5px solid #f1f5f9'}}>
               <div style={{width:8,height:8,borderRadius:'50%',background:col[n.type]||'#94a3b8',marginTop:5,flexShrink:0}}/>
               <div style={{flex:1}}>
-                <div style={{fontSize:13,color:'#1e293b'}}>{n.text}</div>
+                <div style={{fontSize:13,color:'#1e293b'}}>{n.body}</div>
                 <div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>{n.dt} ・ {lbl[n.type]||''}</div>
               </div>
             </div>
           ))}
         </div>
         <div style={{fontSize:11,color:'#94a3b8',padding:'0 16px',lineHeight:1.6}}>
-          ※この画面はアプリ内の記録です。メンバーのスマホへ自動でプッシュ通知を送るには、Vercel等でのホスティングと通知サービス（LINE公式アカウント等）の接続が必要です。
+          ※他の人の操作は、ヘッダーの「更新」を押すと最新の状態に反映されます。
         </div>
       </div>
     );
@@ -531,10 +541,11 @@ export default function App() {
         <div style={S.sectionTitle}>現場を追加</div>
         <div style={{display:'flex',gap:8}}>
           <input style={{...S.input,flex:1}} placeholder="現場名" value={nsName} onChange={e=>setNsName(e.target.value)}/>
-          <button style={{...S.btnSm,background:'linear-gradient(135deg,#9a3412,#c2410c)',color:'#fff',border:'none'}} onClick={()=>{
+          <button style={{...S.btnSm,background:'linear-gradient(135deg,#9a3412,#c2410c)',color:'#fff',border:'none'}} onClick={async ()=>{
             if(!nsName.trim()) return;
-            setSites(p=>[...p,{id:nextId,name:nsName.trim(),color:SC[p.length%SC.length]}]);
-            setNextId(n=>n+1);setNsName('');
+            const { data, error } = await supabase.from('sites').insert({name:nsName.trim(),color:SC[sites.length%SC.length]}).select().single();
+            if(error) return dberr(error);
+            setSites(p=>[...p,data]); setNsName('');
           }}>追加</button>
         </div>
       </div>
@@ -545,9 +556,14 @@ export default function App() {
             <div style={{width:14,height:14,borderRadius:'50%',background:s.color}}/>
             <div style={{flex:1}}>
               <div style={{fontSize:15,fontWeight:700}}>{s.name}</div>
-              <div style={{fontSize:12,color:'#94a3b8'}}>持出中 {outTools.filter(t=>t.siteId===s.id).length}点</div>
+              <div style={{fontSize:12,color:'#94a3b8'}}>持出中 {outTools.filter(t=>t.site_id===s.id).length}点</div>
             </div>
-            <button style={S.btnDanger} onClick={()=>setSites(p=>p.filter(x=>x.id!==s.id))}>削除</button>
+            <button style={S.btnDanger} onClick={async ()=>{
+              if(!window.confirm(`「${s.name}」を削除しますか？\n全員の画面から消えます。`)) return;
+              const { error } = await supabase.from('sites').delete().eq('id', s.id);
+              if(error) return dberr(error);
+              setSites(p=>p.filter(x=>x.id!==s.id));
+            }}>削除</button>
           </div>
         </div>
       ))}
@@ -556,16 +572,24 @@ export default function App() {
         <div style={S.sectionTitle}>メンバー管理</div>
         <div style={{display:'flex',gap:8,marginBottom:12}}>
           <input style={{...S.input,flex:1}} placeholder="メンバー名を追加" value={newMem} onChange={e=>setNewMem(e.target.value)}/>
-          <button style={{...S.btnSm,background:'linear-gradient(135deg,#9a3412,#c2410c)',color:'#fff',border:'none'}} onClick={()=>{
-            if(!newMem.trim()||members.includes(newMem.trim())) return;
-            setMembers(p=>[...p,newMem.trim()]);setNewMem('');
+          <button style={{...S.btnSm,background:'linear-gradient(135deg,#9a3412,#c2410c)',color:'#fff',border:'none'}} onClick={async ()=>{
+            const name = newMem.trim();
+            if(!name || members.some(m=>m.name===name)) return;
+            const { data, error } = await supabase.from('members').insert({name}).select().single();
+            if(error) return dberr(error);
+            setMembers(p=>[...p,data]); setNewMem('');
           }}>追加</button>
         </div>
         <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-          {members.map((m,i)=>(
-            <div key={i} style={{display:'flex',alignItems:'center',gap:4,background:'#f8fafc',border:'1.5px solid #e2e8f0',borderRadius:20,padding:'5px 10px 5px 14px'}}>
-              <span style={{fontSize:13,fontWeight:600}}>{m}</span>
-              <button onClick={()=>setMembers(p=>p.filter((_,idx)=>idx!==i))}
+          {members.map(m=>(
+            <div key={m.id} style={{display:'flex',alignItems:'center',gap:4,background:'#f8fafc',border:'1.5px solid #e2e8f0',borderRadius:20,padding:'5px 10px 5px 14px'}}>
+              <span style={{fontSize:13,fontWeight:600}}>{m.name}</span>
+              <button onClick={async ()=>{
+                if(!window.confirm(`「${m.name}」をメンバーから外しますか？`)) return;
+                const { error } = await supabase.from('members').delete().eq('id', m.id);
+                if(error) return dberr(error);
+                setMembers(p=>p.filter(x=>x.id!==m.id));
+              }}
                 style={{background:'none',border:'none',cursor:'pointer',color:'#94a3b8',fontSize:16,padding:'0 0 0 6px',lineHeight:1}}>✕</button>
             </div>
           ))}
@@ -583,6 +607,15 @@ export default function App() {
     {id:'cfg',icon:'⚙️',label:'設定'},
   ];
 
+  if(loading) return (
+    <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:'#f5f2ee',fontFamily:'-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif'}}>
+      <div style={{textAlign:'center',color:'#94a3b8'}}>
+        <div style={{fontSize:32,marginBottom:10}}>🏭</div>
+        <div style={{fontSize:14,fontWeight:600}}>倉庫データを読み込み中…</div>
+      </div>
+    </div>
+  );
+
   return (
     <div style={{minHeight:'100vh',background:'#f5f2ee',fontFamily:'-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif'}}>
       {/* ヘッダー */}
@@ -595,6 +628,7 @@ export default function App() {
         {(lowMats.length>0 || longOut.length>0) && (
           <div style={{background:'#fff',color:'#c2410c',borderRadius:20,padding:'4px 10px',fontSize:11,fontWeight:800}}>要対応 {lowMats.length+longOut.length}</div>
         )}
+        <button onClick={fetchAll} style={{background:'rgba(255,255,255,0.2)',border:'none',color:'#fff',borderRadius:10,padding:'8px 12px',fontSize:12,fontWeight:700,cursor:'pointer'}}>↻ 更新</button>
       </div>
 
       {/* コンテンツ */}
