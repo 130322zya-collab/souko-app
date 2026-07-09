@@ -1,3 +1,4 @@
+
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
 
@@ -61,13 +62,16 @@ export default function App() {
   const [mcat, setMcat] = useState('all');
   const [mForm, setMForm] = useState(null);
   const [mAdd, setMAdd] = useState(false);
-  const [nm, setNm] = useState({name:'',category:MCAT_A[0],qty:'',unit:'枚',min:'',loc:''});
+  const [nm, setNm] = useState({name:'',category:MCAT_A[0],customCat:'',qty:'',unit:'枚',min:'',loc:''});
   // 倉庫B
   const [bview, setBview] = useState('tool');
   const [tflt, setTflt] = useState('all');
   const [tForm, setTForm] = useState(null);
   const [tAdd, setTAdd] = useState(false);
   const [nt, setNt] = useState({name:'',no:'',category:TCAT[0],checkDue:''});
+  const [tSearch, setTSearch] = useState('');
+  const [tViewMode, setTViewMode] = useState('list'); // 'list' | 'group'
+  const [groupOpen, setGroupOpen] = useState(null);
   // 設定
   const [nsName, setNsName] = useState('');
   const [newMem, setNewMem] = useState('');
@@ -127,13 +131,18 @@ export default function App() {
   const addMat = async () => {
     if(!nm.name.trim()) return alert('品名は必須です');
     const wh = mAdd;
+    let category = wh==='B' ? '金物' : nm.category;
+    if(wh==='A' && nm.category==='__new__'){
+      if(!nm.customCat.trim()) return alert('新しい分類名を入力してください');
+      category = nm.customCat.trim();
+    }
     const { data, error } = await supabase.from('materials').insert({
-      wh, name:nm.name.trim(), category: wh==='B' ? '金物' : nm.category,
+      wh, name:nm.name.trim(), category,
       qty: parseInt(nm.qty)||0, unit: nm.unit||'個', min_qty: parseInt(nm.min)||0, loc: nm.loc.trim()
     }).select().single();
     if(error) return dberr(error);
     setMaterials(p => [...p, data]);
-    setNm({name:'',category:MCAT_A[0],qty:'',unit:'枚',min:'',loc:''});
+    setNm({name:'',category:MCAT_A[0],customCat:'',qty:'',unit:'枚',min:'',loc:''});
     setMAdd(false);
   };
 
@@ -251,15 +260,32 @@ export default function App() {
   };
 
   // ── 在庫品 登録フォーム（共通） ──
-  const matAddForm = (wh) => (
+  const matAddForm = (wh) => {
+    // 過去に登録された品名を候補として出す（入力を楽にする）
+    const nameOptions = [...new Set(materials.filter(m => m.wh===wh).map(m => m.name))];
+    // 分類の候補＝初期リスト＋実際にDBにある分類（自由追加した分がここに増えていく）
+    const catOptions = [...new Set([...MCAT_A, ...materials.filter(m => m.wh==='A').map(m => m.category)])];
+    return (
     <div style={{...S.card,borderColor:'#fdba74'}}>
       <div style={S.sectionTitle}>{wh==='A'?'材料を登録（倉庫A）':'金物を登録（倉庫B）'}</div>
-      <div style={{marginBottom:10}}><label style={S.label}>品名</label><input style={S.input} placeholder={wh==='A'?'例：構造用合板 24mm 3×6':'例：羽子板ボルト'} value={nm.name} onChange={e=>setNm(f=>({...f,name:e.target.value}))}/></div>
+      <div style={{marginBottom:10}}>
+        <label style={S.label}>品名</label>
+        <input style={S.input} list={`matNames-${wh}`} placeholder={wh==='A'?'例：構造用合板 24mm 3×6':'例：羽子板ボルト'} value={nm.name} onChange={e=>setNm(f=>({...f,name:e.target.value}))}/>
+        <datalist id={`matNames-${wh}`}>
+          {nameOptions.map(n=><option key={n} value={n}/>)}
+        </datalist>
+        {nameOptions.length>0 && <div style={{fontSize:10,color:'#94a3b8',marginTop:4}}>入力欄をタップすると過去の品名候補が出ます</div>}
+      </div>
       {wh==='A' && (
-        <div style={{marginBottom:10}}><label style={S.label}>分類</label>
+        <div style={{marginBottom:10}}>
+          <label style={S.label}>分類</label>
           <select style={S.input} value={nm.category} onChange={e=>setNm(f=>({...f,category:e.target.value}))}>
-            {MCAT_A.map(c=><option key={c}>{c}</option>)}
+            {catOptions.map(c=><option key={c}>{c}</option>)}
+            <option value="__new__">＋ 新しい分類を追加</option>
           </select>
+          {nm.category==='__new__' && (
+            <input style={{...S.input,marginTop:8}} placeholder="新しい分類名を入力" value={nm.customCat} onChange={e=>setNm(f=>({...f,customCat:e.target.value}))}/>
+          )}
         </div>
       )}
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:8,marginBottom:10}}>
@@ -273,7 +299,8 @@ export default function App() {
         <button style={{...S.btnPrimary,flex:2}} onClick={addMat}>登録する</button>
       </div>
     </div>
-  );
+    );
+  };
 
   // ── ホーム ──
   const renderHome = () => (
@@ -353,6 +380,7 @@ export default function App() {
 
   // ── 倉庫A（材料・建材・SE金物） ──
   const renderWhA = () => {
+    const catList = [...new Set([...MCAT_A, ...materials.filter(m => m.wh==='A').map(m => m.category)])];
     const list = materials.filter(m => m.wh==='A' && (mcat==='all' || m.category===mcat));
     return (
       <div>
@@ -360,7 +388,7 @@ export default function App() {
           <div style={{fontSize:12,fontWeight:700,color:'#94a3b8',marginBottom:8}}>倉庫A：材料・建材・SE金物</div>
           <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
             <Chip active={mcat==='all'} onClick={()=>setMcat('all')}>すべて</Chip>
-            {MCAT_A.map(c => <Chip key={c} active={mcat===c} onClick={()=>setMcat(c)}>{c}</Chip>)}
+            {catList.map(c => <Chip key={c} active={mcat===c} onClick={()=>setMcat(c)}>{c}</Chip>)}
           </div>
         </div>
 
@@ -373,10 +401,103 @@ export default function App() {
     );
   };
 
+  // ── 道具カード（一覧表示・グループ展開の両方で使う） ──
+  const toolCard = (t) => {
+    const out = t.status === '持出中';
+    const d = out ? daysBetween(t.out_date, today()) : 0;
+    const due = t.check_due && daysBetween(today(), t.check_due) <= 30;
+    const opened = tForm && tForm.id === t.id;
+    return (
+      <div key={t.id} style={S.card}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
+          <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
+            <Badge type={out?'amber':'green'}>{t.status}</Badge>
+            {t.mgmt_no && <Badge type="gray">{t.mgmt_no}</Badge>}
+            {out && d >= 7 && <Badge type="red">{d}日経過</Badge>}
+            {due && <Badge type="orange">点検 {fmt(t.check_due)}まで</Badge>}
+          </div>
+        </div>
+        <div style={{fontSize:14,fontWeight:700,color:'#1e293b'}}>{t.name}</div>
+        <div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>{t.category}</div>
+        {out && (
+          <div style={{fontSize:12,color:'#64748b',marginTop:6,background:'#fffbeb',borderRadius:8,padding:'7px 10px'}}>
+            {gs(t.site_id)?.name} / {t.member} / {fmt(t.out_date)}持出
+          </div>
+        )}
+
+        {!opened ? (
+          <div style={{display:'flex',gap:6,marginTop:10,paddingTop:10,borderTop:'0.5px solid #f1f5f9'}}>
+            {out
+              ? <button style={{...S.btnSm,flex:1,color:'#16a34a',borderColor:'#bbf7d0'}} onClick={()=>execBack(t.id)}>返却する</button>
+              : <button style={{...S.btnSm,flex:1,color:'#c2410c',borderColor:'#fdba74'}} onClick={()=>setTForm({id:t.id,member:firstMem(),siteId:''})}>持ち出す</button>}
+            {!out && (
+              <button style={{...S.btnSm,color:'#dc2626',borderColor:'#fecaca'}} onClick={()=>delTool(t)}>削除</button>
+            )}
+          </div>
+        ) : (
+          <div style={{marginTop:10,paddingTop:10,borderTop:'0.5px solid #f1f5f9'}}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
+              <select style={S.input} value={tForm.member} onChange={e=>setTForm(f=>({...f,member:e.target.value}))}>
+                {members.map(x=><option key={x.id} value={x.name}>{x.name}</option>)}
+              </select>
+              <select style={S.input} value={tForm.siteId} onChange={e=>setTForm(f=>({...f,siteId:e.target.value}))}>
+                <option value="">現場を選択</option>
+                {sites.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </div>
+            <div style={{display:'flex',gap:8}}>
+              <button style={{...S.btnSm,flex:1}} onClick={()=>setTForm(null)}>キャンセル</button>
+              <button style={{...S.btnPrimary,flex:2}} onClick={execOut}>持出を記録</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── 道具を名前ごとにまとめたグループ表示 ──
+  const renderToolGroups = (searched) => {
+    const groups = {};
+    searched.forEach(t => {
+      if(!groups[t.name]) groups[t.name] = [];
+      groups[t.name].push(t);
+    });
+    const names = Object.keys(groups).sort();
+    if(!names.length) return <div style={{textAlign:'center',padding:32,color:'#94a3b8',fontSize:14}}>該当する道具がありません</div>;
+    return names.map(name => {
+      const items = groups[name];
+      const outCount = items.filter(t => t.status==='持出中').length;
+      const isOpen = groupOpen === name;
+      return (
+        <div key={name} style={S.card}>
+          <div onClick={()=>setGroupOpen(isOpen?null:name)} style={{display:'flex',justifyContent:'space-between',alignItems:'center',cursor:'pointer'}}>
+            <div>
+              <div style={{fontSize:14,fontWeight:700,color:'#1e293b'}}>{name}</div>
+              <div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>{items[0].category}</div>
+            </div>
+            <div style={{display:'flex',alignItems:'center',gap:8}}>
+              <Badge type={outCount>0?'amber':'green'}>持出 {outCount}／計{items.length}台</Badge>
+              <span style={{fontSize:12,color:'#94a3b8'}}>{isOpen?'閉じる':'内訳'}</span>
+            </div>
+          </div>
+          {isOpen && (
+            <div style={{marginTop:12,paddingTop:12,borderTop:'0.5px solid #f1f5f9',display:'flex',flexDirection:'column',gap:10}}>
+              {items.map(t => toolCard(t))}
+            </div>
+          )}
+        </div>
+      );
+    });
+  };
+
   // ── 倉庫B（道具・金物） ──
   const renderWhB = () => {
     const kanas = materials.filter(m => m.wh==='B');
-    const list = tools.filter(t => tflt==='all' || t.status===tflt);
+    const q = tSearch.trim().toLowerCase();
+    const searched = tools.filter(t =>
+      (tflt==='all' || t.status===tflt) &&
+      (!q || t.name.toLowerCase().includes(q) || (t.mgmt_no||'').toLowerCase().includes(q))
+    );
     return (
       <div>
         <div style={{...S.card,padding:'12px 14px'}}>
@@ -386,9 +507,16 @@ export default function App() {
             <Chip active={bview==='kana'} onClick={()=>setBview('kana')}>金物（{kanas.length}）</Chip>
           </div>
           {bview==='tool' && (
-            <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
-              {['all','倉庫','持出中'].map(f => <Chip key={f} active={tflt===f} onClick={()=>setTflt(f)}>{f==='all'?'すべて':f}</Chip>)}
-            </div>
+            <>
+              <input style={{...S.input,marginBottom:8}} placeholder="道具名・管理番号で検索" value={tSearch} onChange={e=>setTSearch(e.target.value)}/>
+              <div style={{display:'flex',flexWrap:'wrap',gap:6,marginBottom:8}}>
+                {['all','倉庫','持出中'].map(f => <Chip key={f} active={tflt===f} onClick={()=>setTflt(f)}>{f==='all'?'すべて':f}</Chip>)}
+              </div>
+              <div style={{display:'flex',gap:6}}>
+                <Chip active={tViewMode==='list'} color="#2563eb" onClick={()=>setTViewMode('list')}>一覧表示</Chip>
+                <Chip active={tViewMode==='group'} color="#2563eb" onClick={()=>setTViewMode('group')}>名前別に管理</Chip>
+              </div>
+            </>
           )}
         </div>
 
@@ -423,58 +551,12 @@ export default function App() {
               </div>
             )}
 
-            {list.map(t => {
-              const out = t.status === '持出中';
-              const d = out ? daysBetween(t.out_date, today()) : 0;
-              const due = t.check_due && daysBetween(today(), t.check_due) <= 30;
-              const opened = tForm && tForm.id === t.id;
-              return (
-                <div key={t.id} style={S.card}>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6}}>
-                    <div style={{display:'flex',gap:5,flexWrap:'wrap'}}>
-                      <Badge type={out?'amber':'green'}>{t.status}</Badge>
-                      {t.mgmt_no && <Badge type="gray">{t.mgmt_no}</Badge>}
-                      {out && d >= 7 && <Badge type="red">{d}日経過</Badge>}
-                      {due && <Badge type="orange">点検 {fmt(t.check_due)}まで</Badge>}
-                    </div>
-                  </div>
-                  <div style={{fontSize:14,fontWeight:700,color:'#1e293b'}}>{t.name}</div>
-                  <div style={{fontSize:11,color:'#94a3b8',marginTop:2}}>{t.category}</div>
-                  {out && (
-                    <div style={{fontSize:12,color:'#64748b',marginTop:6,background:'#fffbeb',borderRadius:8,padding:'7px 10px'}}>
-                      {gs(t.site_id)?.name} / {t.member} / {fmt(t.out_date)}持出
-                    </div>
-                  )}
-
-                  {!opened ? (
-                    <div style={{display:'flex',gap:6,marginTop:10,paddingTop:10,borderTop:'0.5px solid #f1f5f9'}}>
-                      {out
-                        ? <button style={{...S.btnSm,flex:1,color:'#16a34a',borderColor:'#bbf7d0'}} onClick={()=>execBack(t.id)}>返却する</button>
-                        : <button style={{...S.btnSm,flex:1,color:'#c2410c',borderColor:'#fdba74'}} onClick={()=>setTForm({id:t.id,member:firstMem(),siteId:''})}>持ち出す</button>}
-                      {!out && (
-                        <button style={{...S.btnSm,color:'#dc2626',borderColor:'#fecaca'}} onClick={()=>delTool(t)}>削除</button>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{marginTop:10,paddingTop:10,borderTop:'0.5px solid #f1f5f9'}}>
-                      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:8}}>
-                        <select style={S.input} value={tForm.member} onChange={e=>setTForm(f=>({...f,member:e.target.value}))}>
-                          {members.map(x=><option key={x.id} value={x.name}>{x.name}</option>)}
-                        </select>
-                        <select style={S.input} value={tForm.siteId} onChange={e=>setTForm(f=>({...f,siteId:e.target.value}))}>
-                          <option value="">現場を選択</option>
-                          {sites.map(s=><option key={s.id} value={s.id}>{s.name}</option>)}
-                        </select>
-                      </div>
-                      <div style={{display:'flex',gap:8}}>
-                        <button style={{...S.btnSm,flex:1}} onClick={()=>setTForm(null)}>キャンセル</button>
-                        <button style={{...S.btnPrimary,flex:2}} onClick={execOut}>持出を記録</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {tViewMode==='group'
+              ? renderToolGroups(searched)
+              : (searched.length
+                  ? searched.map(t => toolCard(t))
+                  : <div style={{textAlign:'center',padding:32,color:'#94a3b8',fontSize:14}}>該当する道具がありません</div>)
+            }
           </div>
         )}
       </div>
